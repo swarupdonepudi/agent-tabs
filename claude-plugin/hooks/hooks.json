@@ -1,0 +1,19 @@
+{
+  "description": "Agent Tabs: record which conversation runs in which VS Code tab, so the tab can resume it after a restart",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/register.sh\" start", "timeout": 5 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/register.sh\" end", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}
