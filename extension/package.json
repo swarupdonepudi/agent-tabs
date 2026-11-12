@@ -2,7 +2,7 @@
   "name": "agent-tabs",
   "displayName": "Agent Tabs",
   "description": "Your terminal coding agents survive a VS Code restart. Quit, reopen, and every Claude Code tab is back in its own conversation.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "swarupdonepudi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -43,7 +43,7 @@
         "agentTabs.defaultFolder": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Where new tabs open: a workspace folder's name (e.g. `api`) or an absolute path. Empty means the first workspace folder."
+          "markdownDescription": "Where new tabs open: a workspace folder's name (e.g. `api`), an absolute path or a path starting with `~/`. Empty means the first workspace folder. The `AGENT_TABS_FOLDER` environment variable, when set, overrides this on one machine."
         },
         "agentTabs.extraArgs": {
           "type": "array",

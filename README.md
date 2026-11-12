@@ -44,7 +44,7 @@ Because the agent reports its own session, this stays right when you `/clear`, `
 | Setting | Default | Meaning |
 |---|---|---|
 | `agentTabs.defaultAgent` | `claude` | The agent a new tab starts |
-| `agentTabs.defaultFolder` | first workspace folder | A workspace folder's name or an absolute path |
+| `agentTabs.defaultFolder` | first workspace folder | A workspace folder's name, an absolute path or `~/…`. The `AGENT_TABS_FOLDER` environment variable overrides it on one machine |
 | `agentTabs.extraArgs` | `[]` | Added to every start and resume, e.g. `["--chrome"]` |
 | `agentTabs.restoreOnStartup` | `true` | Rebuild saved tabs when the workspace opens |
 

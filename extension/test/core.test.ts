@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { claude } from "../src/agents/claude";
-import { resolveFolder } from "../src/folders";
+import { resolveFolder, wantedFolder } from "../src/folders";
 import { deleteSession, readSession, sessionsDir } from "../src/registry";
 import { planRestore } from "../src/restore";
 import { commandLine, quote } from "../src/shell";
@@ -64,6 +64,13 @@ test("resolveFolder picks by name, then absolute path, then first folder", () =>
   assert.equal(resolveFolder("", folders, "/home"), "/p");
   assert.equal(resolveFolder("missing", folders, "/home"), "/p");
   assert.equal(resolveFolder("", [], "/home"), "/home");
+  assert.equal(resolveFolder("~/code/app", folders, "/home"), "/home/code/app");
+});
+
+test("AGENT_TABS_FOLDER overrides the setting", () => {
+  assert.equal(wantedFolder("planton-platform", {}), "planton-platform");
+  assert.equal(wantedFolder("planton-platform", { AGENT_TABS_FOLDER: " stigmer " }), "stigmer");
+  assert.equal(wantedFolder("planton-platform", { AGENT_TABS_FOLDER: "" }), "planton-platform");
 });
 
 test("planRestore resumes, opens a shell, or falls back to the picker", () => {

@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import * as os from "os";
 import * as vscode from "vscode";
 import { getAdapter, type AgentAdapter } from "./agents";
-import { resolveFolder } from "./folders";
+import { resolveFolder, wantedFolder } from "./folders";
 import { deleteSession, readSession } from "./registry";
 import { planRestore } from "./restore";
 import { TabStore } from "./store";
@@ -25,7 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const c = vscode.workspace.getConfiguration("agentTabs");
     return {
       agent: c.get<string>("defaultAgent", "claude"),
-      folder: c.get<string>("defaultFolder", ""),
+      folder: wantedFolder(c.get<string>("defaultFolder", ""), process.env),
       extraArgs: c.get<string[]>("extraArgs", []).filter((a) => typeof a === "string"),
       restoreOnStartup: c.get<boolean>("restoreOnStartup", true),
     };
