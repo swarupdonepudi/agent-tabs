@@ -1,11 +1,11 @@
 {
   "name": "agent-tabs",
-  "description": "Agent Tabs: terminal coding agents that survive a VS Code restart",
+  "description": "Agent Tabs: terminal coding agents that survive a VS Code restart, with each tab showing what its agent is doing",
   "owner": { "name": "Swarup Donepudi" },
   "plugins": [
     {
       "name": "agent-tabs",
-      "description": "Tells the Agent Tabs VS Code extension which Claude Code conversation runs in which terminal tab, so every tab comes back after a restart.",
+      "description": "Tells the Agent Tabs VS Code extension which Claude Code conversation runs in which terminal tab, so every tab comes back after a restart, and shows on each tab whether Claude is working, needs you, or is done.",
       "source": "./claude-plugin",
       "category": "productivity",
       "homepage": "https://github.com/swarupdonepudi/agent-tabs"

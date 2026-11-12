@@ -23,4 +23,4 @@ jobs:
       - run: npm run check
       - name: Lint the hook
         if: runner.os == 'Linux'
-        run: shellcheck ../claude-plugin/hooks/register.sh
+        run: shellcheck ../claude-plugin/hooks/register.sh ../claude-plugin/hooks/status.sh

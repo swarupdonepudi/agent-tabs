@@ -1,8 +1,8 @@
 {
   "name": "agent-tabs",
   "displayName": "Agent Tabs",
-  "description": "Your terminal coding agents survive a VS Code restart. Quit, reopen, and every Claude Code tab is back in its own conversation.",
-  "version": "0.1.1",
+  "description": "Your terminal coding agents survive a VS Code restart, and every tab shows whether its agent is working, needs you, or is done.",
+  "version": "0.2.0",
   "publisher": "swarupdonepudi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -57,6 +57,10 @@
           "description": "Reopen the saved tabs, each in its own conversation, when the workspace opens."
         }
       }
+    },
+    "configurationDefaults": {
+      "terminal.integrated.tabs.allowAgentCliTitle": false,
+      "terminal.integrated.tabs.title": "${progress} ${sequence}"
     }
   },
   "scripts": {
