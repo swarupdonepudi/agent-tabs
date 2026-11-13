@@ -16,6 +16,7 @@
 
 [ "$TERM_PROGRAM" = "vscode" ] || { cat >/dev/null; exit 0; }
 
+# shellcheck source=lib.sh source-path=SCRIPTDIR
 . "$(dirname "$0")/lib.sh"
 
 event="$1"

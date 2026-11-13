@@ -15,6 +15,7 @@ esac
 
 # A headless `claude -p` started inside the tab (by a script or an agent) is
 # not the tab's conversation and must not replace it.
+# shellcheck source=lib.sh source-path=SCRIPTDIR
 . "$(dirname "$0")/lib.sh"
 claude_tty >/dev/null
 [ $? -eq 1 ] && exit 0
