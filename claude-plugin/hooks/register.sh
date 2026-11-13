@@ -13,6 +13,12 @@ case "$AGENT_TABS_ID" in
   *[!A-Za-z0-9-]*) exit 0 ;;
 esac
 
+# A headless `claude -p` started inside the tab (by a script or an agent) is
+# not the tab's conversation and must not replace it.
+. "$(dirname "$0")/lib.sh"
+claude_tty >/dev/null
+[ $? -eq 1 ] && exit 0
+
 event="${1:-start}"
 input=$(cat)
 

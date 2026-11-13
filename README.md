@@ -35,14 +35,16 @@ Each tab running Claude Code shows an icon before its title:
 
 | Tab | Means |
 |---|---|
-| spinning icon | Claude is working |
+| spinning icon | Claude is working, or a background agent it started still is |
 | alert icon | Claude needs you: a question, a plan to approve, or a permission |
 | no icon | Done, your turn |
 | error icon | The turn stopped on an error |
 
-It works in any VS Code terminal running `claude`, not only tabs opened through Agent Tabs, and it shows on background tabs too, so you can tell which one to switch to.
+It works in any VS Code terminal running `claude`, not only tabs opened through Agent Tabs, and it shows on background tabs too, so you can tell which one to switch to. Background shells (a dev server, a port-forward) don't count as working: they can run for hours.
 
-How it works: the plugin's hooks answer Claude Code's events (prompt submitted, tool started or finished, question asked, permission requested, turn stopped) with an `OSC 9;4` progress signal, which Claude writes to its terminal. VS Code draws that signal in the tab title through the `${progress}` variable. The extension turns this on by setting two defaults:
+Two other marks are not Agent Tabs': the `✳` before an idle conversation's name is Claude Code's own title, and a ⚠ at the far right of a tab is VS Code's terminal warning (hover it: usually "relaunch needed" after an extension changed the terminal's environment). Restarting that tab clears it.
+
+How it works: on each Claude Code event (prompt submitted, tool started or finished, question asked, permission requested, agent started or finished, turn stopped) the plugin's hook finds the terminal of the Claude that ran it and writes an `OSC 9;4` progress signal to it. VS Code draws that signal in the tab title through the `${progress}` variable. A headless `claude -p` has no terminal, so a script or agent running one inside a tab changes nothing there. The extension turns the icon on by setting two defaults:
 
 ```json
 "terminal.integrated.tabs.allowAgentCliTitle": false,

@@ -1,6 +1,6 @@
 {
   "name": "agent-tabs",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Companion to the Agent Tabs VS Code extension: tells it which Claude Code conversation runs in which terminal tab, so every tab comes back after a restart, and shows on each tab whether Claude is working, needs you, or is done.",
   "author": { "name": "Swarup Donepudi" },
   "homepage": "https://github.com/swarupdonepudi/agent-tabs",

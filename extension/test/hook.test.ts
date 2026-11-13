@@ -53,77 +53,142 @@ test("hook does nothing outside Agent Tabs or with unsafe input", () => {
   }
 });
 
+test("hook leaves the tab alone for a headless claude -p started inside it", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-hook-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-cwd-"));
+  const tab = { AGENT_TABS_HOME: home, AGENT_TABS_ID: "tab-1" };
+  try {
+    run("start", { session_id: "11111111-aaaa" }, { ...tab, AGENT_TABS_TTY: "/dev/ttys001" }, cwd);
+    run("start", { session_id: "99999999-headless" }, { ...tab, AGENT_TABS_TTY: "" }, cwd);
+    run("end", { session_id: "99999999-headless", reason: "prompt_input_exit" }, { ...tab, AGENT_TABS_TTY: "" }, cwd);
+    assert.equal(readSession("tab-1", tab)?.sessionId, "11111111-aaaa");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 const STATUS = path.resolve(__dirname, "../../claude-plugin/hooks/status.sh");
 
-/** Runs the status hook and returns the OSC 9;4 state it asked Claude to emit, or null for none. */
-function status(event: string, input: object, env: Record<string, string>): string | null {
-  const out = execFileSync("sh", [STATUS, event], {
-    input: JSON.stringify(input),
-    env: { PATH: process.env.PATH ?? "", ...env },
-  }).toString();
-  if (out.trim() === "") return null;
-  const reply = JSON.parse(out) as { terminalSequence: string; suppressOutput: boolean };
-  assert.equal(reply.suppressOutput, true);
-  const m = /^\u001b\]9;4;(\d)\u0007$/.exec(reply.terminalSequence);
-  assert.ok(m, `unexpected sequence ${JSON.stringify(reply.terminalSequence)}`);
-  return m[1];
+/** A fake tab: runs the status hook against a file standing in for Claude's terminal. */
+function fakeTab(sessionId: string, extraEnv: Record<string, string> = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-status-"));
+  const tty = path.join(home, "tty");
+  fs.writeFileSync(tty, "");
+  const env = { AGENT_TABS_HOME: home, TERM_PROGRAM: "vscode", AGENT_TABS_TTY: tty, ...extraEnv };
+  /** Runs one event; returns the OSC 9;4 state it wrote, or null if it wrote nothing. */
+  const send = (event: string, extra: object = {}): string | null => {
+    const out = execFileSync("sh", [STATUS, event], {
+      input: JSON.stringify({ session_id: sessionId, hook_event_name: event, ...extra }),
+      env: { PATH: process.env.PATH ?? "", ...env },
+    }).toString();
+    assert.equal(out, "", "the hook must not answer Claude on stdout");
+    const written = fs.existsSync(tty) ? fs.readFileSync(tty, "latin1") : "";
+    fs.writeFileSync(tty, "");
+    if (written === "") return null;
+    const m = /^\u001b\]9;4;(\d)\u0007$/.exec(written);
+    assert.ok(m, `unexpected bytes ${JSON.stringify(written)}`);
+    return m[1];
+  };
+  return { home, send, done: () => fs.rmSync(home, { recursive: true, force: true }) };
 }
 
 test("status hook maps each event to the tab's state in VS Code", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-status-"));
-  const env = { AGENT_TABS_HOME: home, TERM_PROGRAM: "vscode" };
-  const s = (event: string, extra: object = {}) =>
-    status(event, { session_id: "sess-1", hook_event_name: event, ...extra }, env);
+  const { send, done } = fakeTab("sess-1");
   try {
-    assert.equal(s("SessionStart"), "0");
-    assert.equal(s("UserPromptSubmit"), "3");
-    assert.equal(s("PreToolUse", { tool_name: "Bash", tool_input: { command: 'echo "tool_name": "AskUserQuestion"' } }), "3");
-    assert.equal(s("PostToolUse", { tool_name: "Bash" }), "3");
-    assert.equal(s("PostToolUseFailure", { tool_name: "Bash" }), "3");
-    assert.equal(s("PreToolUse", { tool_name: "AskUserQuestion" }), "4");
-    assert.equal(s("PreToolUse", { tool_name: "ExitPlanMode" }), "4");
-    assert.equal(s("PermissionRequest", { tool_name: "Bash" }), "4");
-    assert.equal(s("Notification", { notification_type: "permission_prompt" }), "4");
-    assert.equal(s("Notification", { notification_type: "elicitation_dialog" }), "4");
-    assert.equal(s("Notification", { notification_type: "auth_success" }), null);
-    assert.equal(s("Stop"), "0");
-    assert.equal(s("StopFailure"), "2");
-    assert.equal(s("SubagentStop"), null);
-    assert.equal(s("SessionEnd"), "0");
+    assert.equal(send("SessionStart"), "0");
+    assert.equal(send("UserPromptSubmit"), "3");
+    assert.equal(send("PreToolUse", { tool_name: "Bash", tool_input: { command: 'echo "tool_name": "AskUserQuestion"' } }), "3");
+    assert.equal(send("PostToolUse", { tool_name: "Bash" }), "3");
+    assert.equal(send("PostToolUseFailure", { tool_name: "Bash" }), "3");
+    assert.equal(send("PreToolUse", { tool_name: "AskUserQuestion" }), "4");
+    assert.equal(send("PreToolUse", { tool_name: "ExitPlanMode" }), "4");
+    assert.equal(send("PermissionRequest", { tool_name: "Bash" }), "4");
+    assert.equal(send("Notification", { notification_type: "permission_prompt" }), "4");
+    assert.equal(send("Notification", { notification_type: "elicitation_dialog" }), "4");
+    assert.equal(send("Notification", { notification_type: "auth_success" }), null);
+    assert.equal(send("Stop"), "0");
+    assert.equal(send("StopFailure"), "2");
+    assert.equal(send("SessionEnd"), "0");
   } finally {
-    fs.rmSync(home, { recursive: true, force: true });
+    done();
+  }
+});
+
+test("a background agent keeps the tab spinning after the turn ends", () => {
+  const { send, done } = fakeTab("sess-bg");
+  try {
+    send("UserPromptSubmit");
+    assert.equal(send("SubagentStart", { agent_id: "agent-a" }), null);
+    assert.equal(send("SubagentStart", { agent_id: "agent-b" }), null);
+    assert.equal(send("Stop"), "3");
+    // Waiting on agents is not a stale spinner.
+    assert.equal(send("Notification", { notification_type: "idle_prompt" }), null);
+    assert.equal(send("SubagentStop", { agent_id: "agent-a" }), null);
+    assert.equal(send("SubagentStop", { agent_id: "agent-b" }), "0");
+    // A foreground agent that finishes inside a turn changes nothing.
+    send("UserPromptSubmit");
+    send("SubagentStart", { agent_id: "agent-c" });
+    assert.equal(send("SubagentStop", { agent_id: "agent-c" }), null);
+    assert.equal(send("Stop"), "0");
+  } finally {
+    done();
+  }
+});
+
+test("a resumed session forgets the agents of the process before it", () => {
+  const { send, done } = fakeTab("sess-resume");
+  try {
+    send("UserPromptSubmit");
+    send("SubagentStart", { agent_id: "agent-old" });
+    send("SessionStart");
+    send("UserPromptSubmit");
+    assert.equal(send("Stop"), "0");
+  } finally {
+    done();
   }
 });
 
 test("the idle notice clears a stale spinner but never an open question", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-status-"));
-  const env = { AGENT_TABS_HOME: home, TERM_PROGRAM: "vscode" };
-  const s = (event: string, extra: object = {}) =>
-    status(event, { session_id: "sess-2", hook_event_name: event, ...extra }, env);
+  const { send, done } = fakeTab("sess-2");
   const idle = { notification_type: "idle_prompt" };
   try {
-    // Esc interrupts a turn without a Stop event: the spinner is left behind.
-    s("UserPromptSubmit");
-    assert.equal(s("Notification", idle), "0");
-    // A question stays flagged while it waits.
-    s("PreToolUse", { tool_name: "AskUserQuestion" });
-    assert.equal(s("Notification", idle), null);
-    // After a normal finish there is nothing to clear.
-    s("Stop");
-    assert.equal(s("Notification", idle), null);
+    // Esc stops a turn without a Stop event: the spinner is left behind.
+    send("UserPromptSubmit");
+    assert.equal(send("Notification", idle), "0");
+    send("PreToolUse", { tool_name: "AskUserQuestion" });
+    assert.equal(send("Notification", idle), null);
+    send("Stop");
+    assert.equal(send("Notification", idle), null);
   } finally {
-    fs.rmSync(home, { recursive: true, force: true });
+    done();
   }
 });
 
-test("status hook stays silent outside VS Code", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-status-"));
-  try {
-    for (const term of ["iTerm.app", "Apple_Terminal", ""]) {
-      assert.equal(status("UserPromptSubmit", { session_id: "s" }, { AGENT_TABS_HOME: home, TERM_PROGRAM: term }), null);
+test("status hook stays silent outside VS Code and for headless runs", () => {
+  for (const term of ["iTerm.app", "Apple_Terminal", ""]) {
+    const { home, send, done } = fakeTab("s", { TERM_PROGRAM: term });
+    try {
+      assert.equal(send("UserPromptSubmit"), null);
+      assert.deepEqual(fs.readdirSync(home), ["tty"]);
+    } finally {
+      done();
     }
-    assert.deepEqual(fs.readdirSync(home), []);
+  }
+  const headless = fakeTab("s", { AGENT_TABS_TTY: "" });
+  try {
+    assert.equal(headless.send("UserPromptSubmit"), null);
   } finally {
-    fs.rmSync(home, { recursive: true, force: true });
+    headless.done();
+  }
+});
+
+test("status hook ignores unsafe session and agent ids", () => {
+  const { home, send, done } = fakeTab("../evil");
+  try {
+    assert.equal(send("UserPromptSubmit"), null);
+    assert.deepEqual(fs.readdirSync(home), ["tty"]);
+  } finally {
+    done();
   }
 });

@@ -67,6 +67,20 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/status.sh\" SubagentStart", "timeout": 2 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/status.sh\" SubagentStop", "timeout": 2 }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
