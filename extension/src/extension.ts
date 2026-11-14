@@ -1,10 +1,12 @@
+import { execFile } from "child_process";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as vscode from "vscode";
-import { getAdapter, type AgentAdapter } from "./agents";
+import { agentExecutables, getAdapter, type AgentAdapter } from "./agents";
 import { colorFor, folderChoices, rememberRecent, resolveFolder, tildify, wantedFolder } from "./folders";
 import { deleteSession, readSession } from "./registry";
+import { CLIPBOARD_FILES_JXA, filePaste, isAgentCommandLine } from "./paste";
 import { planRestore, restoreLaunches } from "./restore";
 import { TabStore } from "./store";
 
@@ -22,11 +24,36 @@ const LAST_PICKED_KEY = "agentTabs.lastPickedFolder";
 /** Longest wait for other extensions to set up the terminal environment before tabs are rebuilt. */
 const ENV_SETTLE_TIMEOUT_MS = 5000;
 
+/** Set in activate: marks a terminal as running an agent that Agent Tabs launched. */
+let onAgentLaunch: ((term: vscode.Terminal) => void) | undefined;
+
+/** The clipboard's file paths (macOS), or none. */
+function clipboardFiles(): Promise<string[]> {
+  if (process.platform !== "darwin") return Promise.resolve([]);
+  return new Promise((resolve) => {
+    execFile("osascript", ["-l", "JavaScript", "-e", CLIPBOARD_FILES_JXA], { timeout: 3000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      try {
+        const paths: unknown = JSON.parse(stdout);
+        resolve(Array.isArray(paths) ? paths.filter((p): p is string => typeof p === "string" && p !== "") : []);
+      } catch {
+        resolve([]);
+      }
+    });
+  });
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const store = new TabStore(context.workspaceState);
   const tracked = new Map<vscode.Terminal, string>();
   /** Restored tabs whose agent starts the first time the tab is shown. */
   const held = new Map<vscode.Terminal, string>();
+  /**
+   * Terminals where an agent is running now, with the shell command that started
+   * it (when shell integration reported one). Pasted files reach an agent as a
+   * bracketed paste, so it attaches them.
+   */
+  const agentRunning = new Map<vscode.Terminal, vscode.TerminalShellExecution | undefined>();
   /** True while restore creates tabs: VS Code's own activations then are not the person opening a tab. */
   let restoring = false;
   const startHeld = (t: vscode.Terminal | undefined) => {
@@ -37,6 +64,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   const log = vscode.window.createOutputChannel("Agent Tabs", { log: true });
   context.subscriptions.push(log);
+
+  onAgentLaunch = (term) => {
+    if (!agentRunning.has(term)) agentRunning.set(term, undefined);
+  };
 
   const settings = () => {
     const c = vscode.workspace.getConfiguration("agentTabs");
@@ -265,6 +296,23 @@ export function activate(context: vscode.ExtensionContext): void {
       await store.clear();
       void vscode.window.showInformationMessage("Agent Tabs: this workspace has no saved tabs now.");
     }),
+    vscode.commands.registerCommand("agentTabs.paste", async () => {
+      const term = vscode.window.activeTerminal;
+      const files = term ? await clipboardFiles() : [];
+      if (!term || files.length === 0) {
+        await vscode.commands.executeCommand("workbench.action.terminal.paste");
+        return;
+      }
+      term.sendText(filePaste(files, agentRunning.has(term)), false);
+      log.info(`Pasted ${files.length} file path(s) into a tab${agentRunning.has(term) ? " running an agent" : ""}`);
+    }),
+    vscode.window.onDidStartTerminalShellExecution((e) => {
+      if (isAgentCommandLine(e.execution.commandLine.value, agentExecutables())) agentRunning.set(e.terminal, e.execution);
+    }),
+    vscode.window.onDidEndTerminalShellExecution((e) => {
+      const running = agentRunning.get(e.terminal);
+      if (running === e.execution || (running === undefined && agentRunning.has(e.terminal))) agentRunning.delete(e.terminal);
+    }),
     vscode.window.onDidChangeActiveTerminal((t) => {
       if (!restoring) startHeld(t);
     }),
@@ -272,6 +320,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const id = tabIdOf(t);
       tracked.delete(t);
       held.delete(t);
+      agentRunning.delete(t);
       if (!id) return;
       // Forget a tab only when the person closed it or its shell exited.
       // Quitting VS Code (Shutdown) or an unknown reason keeps it for the next start.
@@ -295,6 +344,7 @@ export function deactivate(): void {
 
 /** Run a command once the shell is ready, through shell integration when available. */
 function runWhenReady(term: vscode.Terminal, command: string): void {
+  onAgentLaunch?.(term);
   if (term.shellIntegration) {
     term.shellIntegration.executeCommand(command);
     return;

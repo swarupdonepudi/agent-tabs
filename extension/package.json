@@ -2,7 +2,7 @@
   "name": "agent-tabs",
   "displayName": "Agent Tabs",
   "description": "Your terminal coding agents survive a VS Code restart, and every tab shows whether its agent is working, needs you, or is done.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "swarupdonepudi",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -24,13 +24,15 @@
       { "command": "agentTabs.newTab", "title": "New Agent Tab", "category": "Agent Tabs" },
       { "command": "agentTabs.resumeTab", "title": "New Tab from a Past Conversation", "category": "Agent Tabs" },
       { "command": "agentTabs.newTabInFolder", "title": "New Tab in Folder…", "category": "Agent Tabs" },
+      { "command": "agentTabs.paste", "title": "Paste (copied files as their full paths)", "category": "Agent Tabs" },
       { "command": "agentTabs.restore", "title": "Restore Saved Tabs", "category": "Agent Tabs" },
       { "command": "agentTabs.forgetAll", "title": "Forget All Saved Tabs in This Workspace", "category": "Agent Tabs" }
     ],
     "keybindings": [
       { "command": "agentTabs.newTab", "key": "ctrl+t", "mac": "cmd+t", "when": "terminalFocus" },
       { "command": "agentTabs.resumeTab", "key": "ctrl+shift+t", "mac": "cmd+shift+t", "when": "terminalFocus" },
-      { "command": "agentTabs.newTabInFolder", "key": "ctrl+alt+t", "mac": "cmd+alt+t", "when": "terminalFocus" }
+      { "command": "agentTabs.newTabInFolder", "key": "ctrl+alt+t", "mac": "cmd+alt+t", "when": "terminalFocus" },
+      { "command": "agentTabs.paste", "key": "cmd+v", "when": "terminalFocus && isMac" }
     ],
     "configuration": {
       "title": "Agent Tabs",

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { claude } from "../src/agents/claude";
 import { colorFor, folderChoices, FOLDER_COLORS, MAX_RECENTS, rememberRecent, resolveFolder, tildify, wantedFolder } from "../src/folders";
 import { deleteSession, readSession, sessionsDir } from "../src/registry";
+import { escapePath, filePaste, isAgentCommandLine } from "../src/paste";
 import { planRestore, restoreLaunches } from "../src/restore";
 import { commandLine, quote } from "../src/shell";
 import { TabStore, type KeyValue, type TabRecord } from "../src/store";
@@ -177,4 +178,26 @@ test("restoreLaunches starts only the shown tab at once; the rest wait to be sho
   assert.deepEqual(restoreLaunches(["a", "b", "c"]), { now: ["a"], onShow: ["b", "c"] });
   assert.deepEqual(restoreLaunches(["a", "b", "c"], 2), { now: ["c"], onShow: ["a", "b"] });
   assert.deepEqual(restoreLaunches([]), { now: [], onShow: [] });
+});
+
+test("escapePath escapes what a shell needs, the way iTerm pastes files", () => {
+  assert.equal(escapePath("/Users/me/Desktop/shot.png"), "/Users/me/Desktop/shot.png");
+  assert.equal(escapePath("/a b/it's (1).png"), "/a\\ b/it\\'s\\ \\(1\\).png");
+  assert.equal(escapePath("/x/$HOME&[y].png"), "/x/\\$HOME\\&\\[y\\].png");
+});
+
+test("filePaste brackets the paths for an agent and types them for a shell", () => {
+  assert.equal(filePaste(["/a.png", "/b c.png"], true), "\x1b[200~/a.png /b\\ c.png\x1b[201~");
+  assert.equal(filePaste(["/a.png", "/b c.png"], false), "/a.png /b\\ c.png");
+});
+
+test("isAgentCommandLine finds the agent after env assignments, bare or by path", () => {
+  const ex = ["claude"];
+  assert.equal(isAgentCommandLine("claude --resume abc --chrome", ex), true);
+  assert.equal(isAgentCommandLine("  claude", ex), true);
+  assert.equal(isAgentCommandLine("/Users/me/.local/bin/claude -p hi", ex), true);
+  assert.equal(isAgentCommandLine("FOO=1 BAR=x claude", ex), true);
+  assert.equal(isAgentCommandLine("echo claude", ex), false);
+  assert.equal(isAgentCommandLine("claude-code-router", ex), false);
+  assert.equal(isAgentCommandLine("", ex), false);
 });

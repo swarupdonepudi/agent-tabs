@@ -8,6 +8,8 @@ export interface AgentAdapter {
   id: string;
   /** Human name, e.g. "Claude Code". */
   displayName: string;
+  /** The executable's name, e.g. "claude": how a shell command line that starts the agent is recognised. */
+  executable: string;
   /** Command line that starts a new conversation. */
   startCommand(extraArgs: string[]): string;
   /** Command line that reopens one saved conversation. */

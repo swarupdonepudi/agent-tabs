@@ -38,6 +38,12 @@ A tab outside the default folder gets a coloured icon, and each folder always ge
 
 To resume a past conversation from another folder, open a tab there with ⌘⌥T and use the agent's own resume (`/resume` in Claude Code). Agents list past conversations per folder.
 
+### Paste images
+
+Copy any number of image files in Finder and press ⌘V in an agent tab: each one arrives as an attachment (`[Image #1] [Image #2] …` in Claude Code), as in iTerm. Text, and an image copied as a picture (a screenshot to the clipboard), paste exactly as before.
+
+VS Code's terminal pastes only the clipboard's text, and Finder's text for copied files is just their names, so on its own VS Code pastes names the agent can't find, or the path of the first file only. On macOS, Agent Tabs' ⌘V reads the copied files' full paths and pastes them all, spaces and quotes escaped. In a tab running an agent, they arrive as a paste, which is what makes the agent attach them; in a plain shell they're typed, ready for a command.
+
 ### Why tabs don't show the folder name
 
 Every tab starts in the default folder unless you pick another, so VS Code's folder name after each title repeated the same word on every row. Agent Tabs sets `terminal.integrated.tabs.description` to VS Code's own default without `${cwdFolder}`. To bring folder names back, add `${cwdFolder}` to that setting. VS Code can't show the name on just some tabs: the description is one template for every tab, so a tab in another folder is marked by its colour instead.
@@ -108,6 +114,8 @@ Commands: **Agent Tabs: Restore Saved Tabs** and **Agent Tabs: Forget All Saved 
 - macOS and Linux. Windows needs a PowerShell version of the hook; contributions welcome.
 - Only tabs opened through Agent Tabs (⌘T, ⌘⇧T, ⌘⌥T) are tracked.
 - Four colours mark other folders, so with five or more of them open, two share a colour.
+- Pasting copied files is macOS only. Elsewhere, VS Code's own paste applies.
+- Agent Tabs knows an agent is running from VS Code's shell integration or because it started the agent itself. An agent started another way (from inside a script) gets the paths as typed text, which it won't attach; drag the files in instead.
 - Status icons take the tab's text color. VS Code offers no way to color them.
 - A finished tab and an idle one look the same: neither shows an icon.
 - After you approve a permission, the alert stays until that tool finishes, because Claude Code has no hook for an approval.

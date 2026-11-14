@@ -14,3 +14,8 @@ export function getAdapter(id: string): AgentAdapter | undefined {
 export function adapterIds(): string[] {
   return Object.keys(adapters);
 }
+
+/** Executable names of every known agent. */
+export function agentExecutables(): string[] {
+  return Object.values(adapters).map((a) => a.executable);
+}
