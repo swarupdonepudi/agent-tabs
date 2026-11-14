@@ -80,7 +80,11 @@ A coding agent's conversation isn't the process. It's saved on disk, and `claude
 
 1. Every tab Agent Tabs opens gets an `AGENT_TABS_ID` in its environment.
 2. Claude Code runs the plugin's `SessionStart` hook whenever a session starts, resumes or is `/clear`ed. The hook writes the tab's current session ID to `~/.agent-tabs/sessions/<AGENT_TABS_ID>.json`.
-3. When the workspace opens, the extension rebuilds each saved tab in order and runs `claude --resume <id>` in the folder the conversation started in.
+3. When the workspace opens, the extension rebuilds each saved tab in order, in the folder its conversation started in. The tab put on screen runs `claude --resume <id>` at once. Every other tab runs it the first time you open that tab.
+
+Starting a conversation only once its tab is on screen does two things. Startup stays light, because ten saved tabs don't launch ten agents at once. And scrolling works: VS Code's terminal gets a broken scroll area when a terminal receives its history before it's first shown, and the wheel does nothing until the next reply.
+
+Before rebuilding tabs, Agent Tabs waits up to 5 seconds for extensions that start with VS Code (Git, Copilot Chat and others) to finish adding their variables to new terminals. Otherwise VS Code marks every restored tab with a "relaunch needed" ⚠.
 
 Because the agent reports its own session, this stays right when you `/clear`, `/resume` another chat, or type `claude` yourself inside a tab. Outside Agent Tabs (iTerm, other terminals) the hook does nothing.
 
@@ -98,6 +102,8 @@ Commands: **Agent Tabs: Restore Saved Tabs** and **Agent Tabs: Forget All Saved 
 ## Limits
 
 - A reply the agent was in the middle of writing when you quit is lost. The conversation reopens at its last saved point; type "continue".
+- A restored tab you haven't opened yet runs nothing, so it shows no status icon, and a conversation that scheduled its own wake-up waits until you open its tab.
+- An extension that changes the terminal environment more than 5 seconds after startup can still make VS Code mark restored tabs "relaunch needed".
 - Tabs come back in the order they were opened, not in an order you dragged them into.
 - macOS and Linux. Windows needs a PowerShell version of the hook; contributions welcome.
 - Only tabs opened through Agent Tabs (⌘T, ⌘⇧T, ⌘⌥T) are tracked.

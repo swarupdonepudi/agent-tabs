@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { getAdapter, type AgentAdapter } from "./agents";
 import { colorFor, folderChoices, rememberRecent, resolveFolder, tildify, wantedFolder } from "./folders";
 import { deleteSession, readSession } from "./registry";
-import { planRestore } from "./restore";
+import { planRestore, restoreLaunches } from "./restore";
 import { TabStore } from "./store";
 
 /** Every tab Agent Tabs opens carries this variable; the agent-side hook reads it. */
@@ -19,10 +19,22 @@ const COMPANION_SEEN_KEY = "agentTabs.companionSeen";
 const RECENTS_KEY = "agentTabs.recentFolders";
 /** The folder picked last in the picker, selected first next time. */
 const LAST_PICKED_KEY = "agentTabs.lastPickedFolder";
+/** Longest wait for other extensions to set up the terminal environment before tabs are rebuilt. */
+const ENV_SETTLE_TIMEOUT_MS = 5000;
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new TabStore(context.workspaceState);
   const tracked = new Map<vscode.Terminal, string>();
+  /** Restored tabs whose agent starts the first time the tab is shown. */
+  const held = new Map<vscode.Terminal, string>();
+  /** True while restore creates tabs: VS Code's own activations then are not the person opening a tab. */
+  let restoring = false;
+  const startHeld = (t: vscode.Terminal | undefined) => {
+    const command = t && held.get(t);
+    if (!t || !command) return;
+    held.delete(t);
+    runWhenReady(t, command);
+  };
   const log = vscode.window.createOutputChannel("Agent Tabs", { log: true });
   context.subscriptions.push(log);
 
@@ -50,7 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return typeof id === "string" ? id : undefined;
   };
 
-  const openTerminal = (id: string, cwd: string, command: string | undefined): vscode.Terminal => {
+  const openTerminal = (id: string, cwd: string, command: string | undefined, startWhenShown = false): vscode.Terminal => {
     // A tab outside the default folder gets that folder's colour, so it stands out in the tab list.
     const color = colorFor(cwd, defaultFolder());
     const term = vscode.window.createTerminal({
@@ -60,7 +72,8 @@ export function activate(context: vscode.ExtensionContext): void {
       color: color ? new vscode.ThemeColor(color) : undefined,
     });
     tracked.set(term, id);
-    if (command) runWhenReady(term, command);
+    if (command && startWhenShown) held.set(term, command);
+    else if (command) runWhenReady(term, command);
     return term;
   };
 
@@ -166,11 +179,15 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }
 
+    await settleTerminalEnvironment();
+
     const extraArgs = settings().extraArgs;
     const steps = planRestore(
       saved.filter((t) => !alive.has(t.id)),
       (id) => readSession(id),
     );
+    const { now } = restoreLaunches(steps);
+    restoring = true;
     let first: vscode.Terminal | undefined;
     for (const step of steps) {
       const adapter = adapterFor(step.tab.agent);
@@ -181,11 +198,37 @@ export function activate(context: vscode.ExtensionContext): void {
           : step.kind === "picker"
             ? adapter.pickerCommand(extraArgs)
             : undefined;
-      const term = openTerminal(step.tab.id, step.cwd, command);
+      const startWhenShown = !now.includes(step);
+      const term = openTerminal(step.tab.id, step.cwd, command, startWhenShown);
       first ??= term;
-      log.info(`Restored tab ${step.tab.id} (${step.kind}) in ${step.cwd}`);
+      log.info(`Restored tab ${step.tab.id} (${step.kind}) in ${step.cwd}${startWhenShown ? ", starts when shown" : ""}`);
     }
     first?.show(true);
+    // Activation events arrive in order: once the first tab is the active one,
+    // every activation VS Code made while creating tabs has been seen.
+    if (first) await waitFor(() => vscode.window.activeTerminal === first, 2000);
+    restoring = false;
+    startHeld(vscode.window.activeTerminal);
+  };
+
+  /**
+   * Extensions that start with VS Code (Git, Copilot Chat and others) add
+   * variables to new terminals as they activate. A terminal created before that
+   * gets VS Code's "relaunch needed" warning, so wait for them first, at most
+   * ENV_SETTLE_TIMEOUT_MS.
+   */
+  const settleTerminalEnvironment = async () => {
+    const startup = vscode.extensions.all.filter((e) => {
+      if (e.id === context.extension.id || e.isActive) return false;
+      const events: unknown = e.packageJSON?.activationEvents;
+      return Array.isArray(events) && events.some((ev) => ev === "*" || ev === "onStartupFinished");
+    });
+    if (startup.length === 0) return;
+    const activations = startup.map((e) => Promise.resolve(e.activate()).catch(() => undefined));
+    await Promise.race([
+      Promise.all(activations),
+      new Promise((resolve) => setTimeout(resolve, ENV_SETTLE_TIMEOUT_MS)),
+    ]);
   };
 
   const checkCompanion = (id: string, adapter: AgentAdapter, term: vscode.Terminal) => {
@@ -222,9 +265,13 @@ export function activate(context: vscode.ExtensionContext): void {
       await store.clear();
       void vscode.window.showInformationMessage("Agent Tabs: this workspace has no saved tabs now.");
     }),
+    vscode.window.onDidChangeActiveTerminal((t) => {
+      if (!restoring) startHeld(t);
+    }),
     vscode.window.onDidCloseTerminal(async (t) => {
       const id = tabIdOf(t);
       tracked.delete(t);
+      held.delete(t);
       if (!id) return;
       // Forget a tab only when the person closed it or its shell exited.
       // Quitting VS Code (Shutdown) or an unknown reason keeps it for the next start.
@@ -272,4 +319,10 @@ function isDirectory(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Resolves once `ready()` is true, or after `timeoutMs`. */
+async function waitFor(ready: () => boolean, timeoutMs: number): Promise<void> {
+  const end = Date.now() + timeoutMs;
+  while (!ready() && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
 }
