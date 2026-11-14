@@ -7,7 +7,7 @@ import { agentExecutables, getAdapter, type AgentAdapter } from "./agents";
 import { colorFor, folderChoices, rememberRecent, resolveFolder, tildify, wantedFolder } from "./folders";
 import { deleteSession, readSession } from "./registry";
 import { CLIPBOARD_FILES_JXA, filePaste, isAgentCommandLine } from "./paste";
-import { planRestore, restoreLaunches } from "./restore";
+import { planRestore } from "./restore";
 import { TabStore } from "./store";
 
 /** Every tab Agent Tabs opens carries this variable; the agent-side hook reads it. */
@@ -23,6 +23,8 @@ const RECENTS_KEY = "agentTabs.recentFolders";
 const LAST_PICKED_KEY = "agentTabs.lastPickedFolder";
 /** Longest wait for other extensions to set up the terminal environment before tabs are rebuilt. */
 const ENV_SETTLE_TIMEOUT_MS = 5000;
+/** How long after a restored tab is first shown its scroll repair runs. */
+const SCROLL_REPAIR_DELAY_MS = 300;
 
 /** Set in activate: marks a terminal as running an agent that Agent Tabs launched. */
 let onAgentLaunch: ((term: vscode.Terminal) => void) | undefined;
@@ -46,21 +48,28 @@ function clipboardFiles(): Promise<string[]> {
 export function activate(context: vscode.ExtensionContext): void {
   const store = new TabStore(context.workspaceState);
   const tracked = new Map<vscode.Terminal, string>();
-  /** Restored tabs whose agent starts the first time the tab is shown. */
-  const held = new Map<vscode.Terminal, string>();
+  /**
+   * Restored tabs not yet shown. VS Code's terminal (xterm.js 6.1) gets a stuck
+   * scroll wheel when it receives scrollback before it is first on screen; a
+   * scroll to the top and back to the bottom once it is shown repairs it.
+   */
+  const needsScrollRepair = new Set<vscode.Terminal>();
   /**
    * Terminals where an agent is running now, with the shell command that started
    * it (when shell integration reported one). Pasted files reach an agent as a
    * bracketed paste, so it attaches them.
    */
   const agentRunning = new Map<vscode.Terminal, vscode.TerminalShellExecution | undefined>();
-  /** True while restore creates tabs: VS Code's own activations then are not the person opening a tab. */
+  /** True while restore creates tabs: VS Code's own activations then don't put a tab on screen. */
   let restoring = false;
-  const startHeld = (t: vscode.Terminal | undefined) => {
-    const command = t && held.get(t);
-    if (!t || !command) return;
-    held.delete(t);
-    runWhenReady(t, command);
+  const repairScrollOnce = (t: vscode.Terminal | undefined) => {
+    if (!t || !needsScrollRepair.delete(t)) return;
+    // Give VS Code a moment to put the tab on screen; the commands act on the active tab.
+    setTimeout(async () => {
+      if (vscode.window.activeTerminal !== t) return;
+      await vscode.commands.executeCommand("workbench.action.terminal.scrollToTop");
+      await vscode.commands.executeCommand("workbench.action.terminal.scrollToBottom");
+    }, SCROLL_REPAIR_DELAY_MS);
   };
   const log = vscode.window.createOutputChannel("Agent Tabs", { log: true });
   context.subscriptions.push(log);
@@ -93,7 +102,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return typeof id === "string" ? id : undefined;
   };
 
-  const openTerminal = (id: string, cwd: string, command: string | undefined, startWhenShown = false): vscode.Terminal => {
+  const openTerminal = (id: string, cwd: string, command: string | undefined): vscode.Terminal => {
     // A tab outside the default folder gets that folder's colour, so it stands out in the tab list.
     const color = colorFor(cwd, defaultFolder());
     const term = vscode.window.createTerminal({
@@ -103,8 +112,7 @@ export function activate(context: vscode.ExtensionContext): void {
       color: color ? new vscode.ThemeColor(color) : undefined,
     });
     tracked.set(term, id);
-    if (command && startWhenShown) held.set(term, command);
-    else if (command) runWhenReady(term, command);
+    if (command) runWhenReady(term, command);
     return term;
   };
 
@@ -217,7 +225,6 @@ export function activate(context: vscode.ExtensionContext): void {
       saved.filter((t) => !alive.has(t.id)),
       (id) => readSession(id),
     );
-    const { now } = restoreLaunches(steps);
     restoring = true;
     let first: vscode.Terminal | undefined;
     for (const step of steps) {
@@ -229,17 +236,17 @@ export function activate(context: vscode.ExtensionContext): void {
           : step.kind === "picker"
             ? adapter.pickerCommand(extraArgs)
             : undefined;
-      const startWhenShown = !now.includes(step);
-      const term = openTerminal(step.tab.id, step.cwd, command, startWhenShown);
+      const term = openTerminal(step.tab.id, step.cwd, command);
+      needsScrollRepair.add(term);
       first ??= term;
-      log.info(`Restored tab ${step.tab.id} (${step.kind}) in ${step.cwd}${startWhenShown ? ", starts when shown" : ""}`);
+      log.info(`Restored tab ${step.tab.id} (${step.kind}) in ${step.cwd}`);
     }
     first?.show(true);
     // Activation events arrive in order: once the first tab is the active one,
     // every activation VS Code made while creating tabs has been seen.
     if (first) await waitFor(() => vscode.window.activeTerminal === first, 2000);
     restoring = false;
-    startHeld(vscode.window.activeTerminal);
+    repairScrollOnce(vscode.window.activeTerminal);
   };
 
   /**
@@ -314,12 +321,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (running === e.execution || (running === undefined && agentRunning.has(e.terminal))) agentRunning.delete(e.terminal);
     }),
     vscode.window.onDidChangeActiveTerminal((t) => {
-      if (!restoring) startHeld(t);
+      if (!restoring) repairScrollOnce(t);
     }),
     vscode.window.onDidCloseTerminal(async (t) => {
       const id = tabIdOf(t);
       tracked.delete(t);
-      held.delete(t);
+      needsScrollRepair.delete(t);
       agentRunning.delete(t);
       if (!id) return;
       // Forget a tab only when the person closed it or its shell exited.

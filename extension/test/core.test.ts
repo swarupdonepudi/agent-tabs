@@ -7,7 +7,7 @@ import { claude } from "../src/agents/claude";
 import { colorFor, folderChoices, FOLDER_COLORS, MAX_RECENTS, rememberRecent, resolveFolder, tildify, wantedFolder } from "../src/folders";
 import { deleteSession, readSession, sessionsDir } from "../src/registry";
 import { escapePath, filePaste, isAgentCommandLine } from "../src/paste";
-import { planRestore, restoreLaunches } from "../src/restore";
+import { planRestore } from "../src/restore";
 import { commandLine, quote } from "../src/shell";
 import { TabStore, type KeyValue, type TabRecord } from "../src/store";
 
@@ -173,12 +173,6 @@ test("tildify shows the home folder as ~", () => {
   assert.equal(tildify("/Users/meow", "/Users/me"), "/Users/meow");
 });
 
-
-test("restoreLaunches starts only the shown tab at once; the rest wait to be shown", () => {
-  assert.deepEqual(restoreLaunches(["a", "b", "c"]), { now: ["a"], onShow: ["b", "c"] });
-  assert.deepEqual(restoreLaunches(["a", "b", "c"], 2), { now: ["c"], onShow: ["a", "b"] });
-  assert.deepEqual(restoreLaunches([]), { now: [], onShow: [] });
-});
 
 test("escapePath escapes what a shell needs, the way iTerm pastes files", () => {
   assert.equal(escapePath("/Users/me/Desktop/shot.png"), "/Users/me/Desktop/shot.png");
