@@ -26,8 +26,21 @@
 |---|---|
 | ⌘T / Ctrl+T | New tab running your agent |
 | ⌘⇧T / Ctrl+Shift+T | New tab with the agent's picker of past conversations |
+| ⌘⌥T / Ctrl+Alt+T | New tab in a folder you pick |
 
 Close a tab, and it's forgotten. Quit VS Code (or let it crash), and every open tab comes back the next time you open the workspace.
+
+### Open a tab in another folder
+
+⌘T always opens in your default folder and never asks. When one session needs another folder, for example a second repository whose files you want the agent to complete and read, press ⌘⌥T. Pick one of your workspace folders, a folder you picked before, or **Browse…**. The agent starts in that folder, so its file completions, its `CLAUDE.md` and its project settings come from there. The pick never changes ⌘T's default, and the folder you picked last is selected first next time.
+
+A tab outside the default folder gets a coloured icon, and each folder always gets the same colour, so it stands out in the tab list. The agent's own banner, inside the tab, shows the folder. When VS Code restarts, the tab comes back in its folder, with its colour.
+
+To resume a past conversation from another folder, open a tab there with ⌘⌥T and use the agent's own resume (`/resume` in Claude Code). Agents list past conversations per folder.
+
+### Why tabs don't show the folder name
+
+Every tab starts in the default folder unless you pick another, so VS Code's folder name after each title repeated the same word on every row. Agent Tabs sets `terminal.integrated.tabs.description` to VS Code's own default without `${cwdFolder}`. To bring folder names back, add `${cwdFolder}` to that setting. VS Code can't show the name on just some tabs: the description is one template for every tab, so a tab in another folder is marked by its colour instead.
 
 ## See what each agent is doing
 
@@ -87,7 +100,8 @@ Commands: **Agent Tabs: Restore Saved Tabs** and **Agent Tabs: Forget All Saved 
 - A reply the agent was in the middle of writing when you quit is lost. The conversation reopens at its last saved point; type "continue".
 - Tabs come back in the order they were opened, not in an order you dragged them into.
 - macOS and Linux. Windows needs a PowerShell version of the hook; contributions welcome.
-- Only tabs opened through Agent Tabs (⌘T, ⌘⇧T) are tracked.
+- Only tabs opened through Agent Tabs (⌘T, ⌘⇧T, ⌘⌥T) are tracked.
+- Four colours mark other folders, so with five or more of them open, two share a colour.
 - Status icons take the tab's text color. VS Code offers no way to color them.
 - A finished tab and an idle one look the same: neither shows an icon.
 - After you approve a permission, the alert stays until that tool finishes, because Claude Code has no hook for an approval.

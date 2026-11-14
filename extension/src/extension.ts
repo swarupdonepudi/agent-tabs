@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
+import * as fs from "fs";
 import * as os from "os";
 import * as vscode from "vscode";
 import { getAdapter, type AgentAdapter } from "./agents";
-import { resolveFolder, wantedFolder } from "./folders";
+import { colorFor, folderChoices, rememberRecent, resolveFolder, tildify, wantedFolder } from "./folders";
 import { deleteSession, readSession } from "./registry";
 import { planRestore } from "./restore";
 import { TabStore } from "./store";
@@ -14,6 +15,10 @@ const SHELL_READY_TIMEOUT_MS = 4000;
 /** If no session file shows up this long after a start, the companion is probably missing. */
 const COMPANION_CHECK_MS = 30000;
 const COMPANION_SEEN_KEY = "agentTabs.companionSeen";
+/** Folders picked from outside the workspace, for the picker's "Recent" group. */
+const RECENTS_KEY = "agentTabs.recentFolders";
+/** The folder picked last in the picker, selected first next time. */
+const LAST_PICKED_KEY = "agentTabs.lastPickedFolder";
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new TabStore(context.workspaceState);
@@ -34,6 +39,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceFolders = () =>
     (vscode.workspace.workspaceFolders ?? []).map((f) => ({ name: f.name, path: f.uri.fsPath }));
 
+  /** Where ⌘T opens: the setting or AGENT_TABS_FOLDER, else the first workspace folder. */
+  const defaultFolder = () => resolveFolder(settings().folder, workspaceFolders(), os.homedir());
+
   const tabIdOf = (t: vscode.Terminal): string | undefined => {
     const fromMap = tracked.get(t);
     if (fromMap) return fromMap;
@@ -43,10 +51,13 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const openTerminal = (id: string, cwd: string, command: string | undefined): vscode.Terminal => {
+    // A tab outside the default folder gets that folder's colour, so it stands out in the tab list.
+    const color = colorFor(cwd, defaultFolder());
     const term = vscode.window.createTerminal({
       cwd,
       env: { [ENV_KEY]: id },
       iconPath: new vscode.ThemeIcon("sparkle"),
+      color: color ? new vscode.ThemeColor(color) : undefined,
     });
     tracked.set(term, id);
     if (command) runWhenReady(term, command);
@@ -59,14 +70,14 @@ export function activate(context: vscode.ExtensionContext): void {
     return adapter;
   };
 
-  const newTab = async (mode: "start" | "picker") => {
+  const newTab = async (mode: "start" | "picker", folder?: string) => {
     const cfg = settings();
     const adapter = adapterFor(cfg.agent);
     if (!adapter) {
       void vscode.window.showErrorMessage(`Agent Tabs: unknown agent "${cfg.agent}".`);
       return;
     }
-    const cwd = resolveFolder(cfg.folder, workspaceFolders(), os.homedir());
+    const cwd = folder ?? defaultFolder();
     const id = randomUUID();
     await store.add({ id, agent: adapter.id, cwd, createdAt: new Date().toISOString() });
     const command =
@@ -75,6 +86,70 @@ export function activate(context: vscode.ExtensionContext): void {
     term.show();
     log.info(`Opened tab ${id} in ${cwd}: ${command}`);
     checkCompanion(id, adapter, term);
+  };
+
+  /** Asks which folder, then opens a tab there. ⌘T's default never changes. */
+  const pickFolder = async (): Promise<string | undefined> => {
+    const home = os.homedir();
+    const folders = workspaceFolders();
+    const recents = (context.globalState.get<string[]>(RECENTS_KEY) ?? []).filter(
+      (r) => typeof r === "string" && isDirectory(r),
+    );
+    const { choices, selected } = folderChoices(
+      folders,
+      defaultFolder(),
+      recents,
+      context.globalState.get<string>(LAST_PICKED_KEY),
+    );
+    type Item = vscode.QuickPickItem & { folder?: string; browse?: true };
+    const items: Item[] = [];
+    let selectedItem: Item | undefined;
+    choices.forEach((c, i) => {
+      if (c.group === "recent" && !items.some((it) => it.kind === vscode.QuickPickItemKind.Separator)) {
+        items.push({ label: "Recent", kind: vscode.QuickPickItemKind.Separator });
+      }
+      const item: Item = {
+        label: `$(${c.group === "recent" ? "history" : "root-folder"}) ${c.name}`,
+        description: c.isDefault ? "default" : undefined,
+        detail: tildify(c.path, home),
+        folder: c.path,
+      };
+      items.push(item);
+      if (i === selected) selectedItem = item;
+    });
+    items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+    items.push({ label: "$(folder-opened) Browse…", browse: true });
+
+    const qp = vscode.window.createQuickPick<Item>();
+    qp.title = "New agent tab in folder";
+    qp.placeholder = "Pick the folder the agent starts in";
+    qp.matchOnDetail = true;
+    qp.items = items;
+    if (selectedItem) qp.activeItems = [selectedItem];
+    const picked = await new Promise<Item | undefined>((resolve) => {
+      qp.onDidAccept(() => resolve(qp.selectedItems[0] ?? qp.activeItems[0]));
+      qp.onDidHide(() => resolve(undefined));
+      qp.show();
+    });
+    qp.dispose();
+    if (!picked) return undefined;
+
+    let folder = picked.folder;
+    if (picked.browse) {
+      const last = context.globalState.get<string>(LAST_PICKED_KEY);
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectFiles: false,
+        canSelectMany: false,
+        openLabel: "Open Agent Tab Here",
+        defaultUri: vscode.Uri.file(last && isDirectory(last) ? last : defaultFolder()),
+      });
+      folder = uris?.[0]?.fsPath;
+    }
+    if (!folder) return undefined;
+    await context.globalState.update(LAST_PICKED_KEY, folder);
+    await context.globalState.update(RECENTS_KEY, rememberRecent(recents, folder, folders));
+    return folder;
   };
 
   const restore = async () => {
@@ -137,6 +212,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("agentTabs.newTab", () => newTab("start")),
     vscode.commands.registerCommand("agentTabs.resumeTab", () => newTab("picker")),
+    vscode.commands.registerCommand("agentTabs.newTabInFolder", async () => {
+      const folder = await pickFolder();
+      if (folder) await newTab("start", folder);
+    }),
     vscode.commands.registerCommand("agentTabs.restore", restore),
     vscode.commands.registerCommand("agentTabs.forgetAll", async () => {
       for (const t of store.list()) deleteSession(t.id);
@@ -185,4 +264,12 @@ function runWhenReady(term: vscode.Terminal, command: string): void {
     if (e.terminal === term) finish(() => e.shellIntegration.executeCommand(command));
   });
   const timer = setTimeout(() => finish(() => term.sendText(command, true)), SHELL_READY_TIMEOUT_MS);
+}
+
+function isDirectory(dir: string): boolean {
+  try {
+    return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
 }

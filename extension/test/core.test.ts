@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { claude } from "../src/agents/claude";
-import { resolveFolder, wantedFolder } from "../src/folders";
+import { colorFor, folderChoices, FOLDER_COLORS, MAX_RECENTS, rememberRecent, resolveFolder, tildify, wantedFolder } from "../src/folders";
 import { deleteSession, readSession, sessionsDir } from "../src/registry";
 import { planRestore } from "../src/restore";
 import { commandLine, quote } from "../src/shell";
@@ -117,4 +117,57 @@ test("registry reads what the hook writes and rejects unsafe ids", () => {
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+const ws = [
+  { name: "projects", path: "/scm/projects" },
+  { name: "life", path: "/scm/life" },
+  { name: "planton-platform", path: "/scm/planton-platform" },
+];
+
+test("folderChoices lists the workspace, then recent picks, and starts on the last pick or the default", () => {
+  const r = folderChoices(ws, "/scm/planton-platform", ["/tmp/notes", "/scm/life"]);
+  assert.deepEqual(r.choices.map((c) => [c.name, c.group, c.isDefault]), [
+    ["projects", "workspace", false],
+    ["life", "workspace", false],
+    ["planton-platform", "workspace", true],
+    ["notes", "recent", false],
+  ]);
+  assert.equal(r.selected, 2);
+  assert.equal(folderChoices(ws, "/scm/planton-platform", [], "/scm/life").selected, 1);
+  assert.equal(folderChoices(ws, "/scm/planton-platform", [], "/gone").selected, 2);
+});
+
+test("folderChoices puts a default folder from outside the workspace first", () => {
+  const r = folderChoices(ws, "/elsewhere/api", []);
+  assert.deepEqual(r.choices[0], { name: "api", path: "/elsewhere/api", group: "workspace", isDefault: true });
+  assert.equal(r.selected, 0);
+  assert.equal(r.choices.length, 4);
+});
+
+test("folderChoices with no workspace offers the default and recent picks", () => {
+  const r = folderChoices([], "/home/me", ["/home/me/code"]);
+  assert.deepEqual(r.choices.map((c) => c.path), ["/home/me", "/home/me/code"]);
+});
+
+test("rememberRecent keeps only folders outside the workspace, newest first", () => {
+  assert.deepEqual(rememberRecent(["/a"], "/scm/life", ws), ["/a"]);
+  assert.deepEqual(rememberRecent(["/a", "/b"], "/b", ws), ["/b", "/a"]);
+  const next = rememberRecent(["/1", "/2", "/3", "/4", "/5"], "/6", ws);
+  assert.equal(next.length, MAX_RECENTS);
+  assert.equal(next[0], "/6");
+});
+
+test("colorFor leaves the default folder plain and gives each other folder a stable colour", () => {
+  assert.equal(colorFor("/scm/planton-platform", "/scm/planton-platform"), undefined);
+  assert.equal(colorFor("/scm/planton-platform/", "/scm/planton-platform"), undefined);
+  const c = colorFor("/scm/life", "/scm/planton-platform");
+  assert.ok(c && (FOLDER_COLORS as readonly string[]).includes(c));
+  assert.equal(colorFor("/scm/life", "/scm/projects"), c);
+});
+
+test("tildify shows the home folder as ~", () => {
+  assert.equal(tildify("/Users/me/scm/life", "/Users/me"), "~/scm/life");
+  assert.equal(tildify("/Users/me", "/Users/me"), "~");
+  assert.equal(tildify("/Users/meow", "/Users/me"), "/Users/meow");
 });
