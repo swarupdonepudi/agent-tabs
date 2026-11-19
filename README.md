@@ -119,7 +119,7 @@ Commands: **Agent Tabs: Restore Saved Tabs** and **Agent Tabs: Forget All Saved 
 - Status icons take the tab's text color. VS Code offers no way to color them.
 - A finished tab and an idle one look the same: neither shows an icon.
 - After you approve a permission, the alert stays until that tool finishes, because Claude Code has no hook for an approval.
-- No hook marks a turn you stop with Esc, so its spinner clears when Claude Code next says it's waiting for input (about a minute later) or when you send the next prompt.
+- Claude Code fires no hook when you stop a turn with Esc. Agent Tabs clears that spinner about 2 seconds later, once Claude's own tab title shows it idle (`✳`). A Claude you started by hand in a terminal Agent Tabs didn't open keeps it until its next prompt or its one-minute "waiting for input" notice.
 
 ## Add your agent
 

@@ -8,6 +8,7 @@ import { colorFor, folderChoices, rememberRecent, resolveFolder, tildify, wanted
 import { deleteSession, readSession } from "./registry";
 import { CLIPBOARD_FILES_JXA, filePaste, isAgentCommandLine } from "./paste";
 import { planRestore } from "./restore";
+import { claudeTitleState, clearSpinner, IDLE_CLEAR_MS, recordedState, shouldClear } from "./status";
 import { TabStore } from "./store";
 
 /** Every tab Agent Tabs opens carries this variable; the agent-side hook reads it. */
@@ -25,6 +26,8 @@ const LAST_PICKED_KEY = "agentTabs.lastPickedFolder";
 const ENV_SETTLE_TIMEOUT_MS = 5000;
 /** How long after a restored tab is first shown its scroll repair runs. */
 const SCROLL_REPAIR_DELAY_MS = 300;
+/** How often tabs running an agent are checked for a spinner Claude has stopped under. */
+const STATUS_CHECK_MS = 1000;
 
 /** Set in activate: marks a terminal as running an agent that Agent Tabs launched. */
 let onAgentLaunch: ((term: vscode.Terminal) => void) | undefined;
@@ -338,6 +341,31 @@ export function activate(context: vscode.ExtensionContext): void {
         log.info(`Forgot tab ${id} (closed)`);
       }
     }),
+  );
+
+  // A spinner can outlive its turn: Esc fires no Stop, and Claude skips its idle
+  // notice while a dialog is open. Claude's own title says when it is idle, so
+  // clear a working spinner it has been idle under for a moment.
+  const idleSince = new Map<vscode.Terminal, number>();
+  const statusTimer = setInterval(() => {
+    const now = Date.now();
+    for (const t of vscode.window.terminals) {
+      if (!agentRunning.has(t) || claudeTitleState(t.name) !== "idle") {
+        idleSince.delete(t);
+        continue;
+      }
+      const since = idleSince.get(t) ?? now;
+      idleSince.set(t, since);
+      if (now - since < IDLE_CLEAR_MS) continue;
+      const id = tabIdOf(t);
+      const sessionId = id ? readSession(id)?.sessionId : undefined;
+      if (!sessionId || !shouldClear(recordedState(sessionId), since, now)) continue;
+      if (clearSpinner(sessionId)) log.info(`Cleared a spinner Claude was idle under (tab ${id})`);
+    }
+  }, STATUS_CHECK_MS);
+  context.subscriptions.push(
+    { dispose: () => clearInterval(statusTimer) },
+    vscode.window.onDidCloseTerminal((t) => idleSince.delete(t)),
   );
 
   if (settings().restoreOnStartup) {

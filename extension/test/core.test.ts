@@ -8,6 +8,7 @@ import { colorFor, folderChoices, FOLDER_COLORS, MAX_RECENTS, rememberRecent, re
 import { deleteSession, readSession, sessionsDir } from "../src/registry";
 import { escapePath, filePaste, isAgentCommandLine } from "../src/paste";
 import { planRestore } from "../src/restore";
+import { claudeTitleState, clearSpinner, IDLE_CLEAR_MS, recordedState, shouldClear } from "../src/status";
 import { commandLine, quote } from "../src/shell";
 import { TabStore, type KeyValue, type TabRecord } from "../src/store";
 
@@ -194,4 +195,47 @@ test("isAgentCommandLine finds the agent after env assignments, bare or by path"
   assert.equal(isAgentCommandLine("echo claude", ex), false);
   assert.equal(isAgentCommandLine("claude-code-router", ex), false);
   assert.equal(isAgentCommandLine("", ex), false);
+});
+
+test("claudeTitleState reads Claude's own title glyphs", () => {
+  assert.equal(claudeTitleState("$(loading~spin) ✳ kfd"), "idle");
+  assert.equal(claudeTitleState("✳ customize vscode"), "idle");
+  assert.equal(claudeTitleState("◐ build-prompt-first-onboarding"), "busy");
+  assert.equal(claudeTitleState("$(loading~spin) ◑ engage"), "busy");
+  assert.equal(claudeTitleState("zsh"), "unknown");
+  assert.equal(claudeTitleState(""), "unknown");
+});
+
+test("shouldClear clears only the working spinner, and only after Claude has looked idle for a while", () => {
+  assert.equal(shouldClear("3", 1000, 1000 + IDLE_CLEAR_MS), true);
+  assert.equal(shouldClear("3", 1000, 1000 + IDLE_CLEAR_MS - 1), false);
+  assert.equal(shouldClear("3", undefined, 99999), false);
+  for (const s of ["0", "2", "4", "bg", undefined]) assert.equal(shouldClear(s, 0, 99999), false);
+});
+
+test("clearSpinner writes the clear signal and records done, only from the working state", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tabs-clear-"));
+  const env = { AGENT_TABS_HOME: home };
+  const dir = path.join(home, "status");
+  fs.mkdirSync(dir);
+  const tty = path.join(home, "tty");
+  try {
+    fs.writeFileSync(tty, "");
+    fs.writeFileSync(path.join(dir, "s1"), "3");
+    assert.equal(clearSpinner("s1", env, tty), true);
+    assert.equal(fs.readFileSync(tty, "latin1"), "\x1b]9;4;0\x07");
+    assert.equal(recordedState("s1", env), "0");
+    assert.equal(clearSpinner("s1", env, tty), false);
+    for (const s of ["4", "bg", "2"]) {
+      fs.writeFileSync(path.join(dir, "s2"), s);
+      assert.equal(clearSpinner("s2", env, tty), false);
+      assert.equal(recordedState("s2", env), s);
+    }
+    fs.writeFileSync(path.join(dir, "s3"), "3");
+    fs.writeFileSync(path.join(dir, "s3.tty"), "/etc/passwd");
+    assert.equal(clearSpinner("s3", env), false);
+    assert.equal(clearSpinner("../x", env, tty), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

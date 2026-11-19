@@ -54,7 +54,12 @@ agents_running() {
 
 state=""
 case "$event" in
-  UserPromptSubmit | PostToolUse | PostToolUseFailure) state=3 ;;
+  UserPromptSubmit | PostToolUse) state=3 ;;
+  PostToolUseFailure)
+    # Esc during a tool call reports the tool as failed with is_interrupt: the
+    # turn is over and Claude is idle. No Stop event follows an interrupt.
+    if printf '%s' "$input" | grep -q '"is_interrupt"[[:space:]]*:[[:space:]]*true'; then state=0; else state=3; fi
+    ;;
   PreToolUse)
     case "$(field tool_name)" in
       AskUserQuestion | ExitPlanMode) state=4 ;;

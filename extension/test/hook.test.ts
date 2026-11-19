@@ -101,6 +101,8 @@ test("status hook maps each event to the tab's state in VS Code", () => {
     assert.equal(send("PreToolUse", { tool_name: "Bash", tool_input: { command: 'echo "tool_name": "AskUserQuestion"' } }), "3");
     assert.equal(send("PostToolUse", { tool_name: "Bash" }), "3");
     assert.equal(send("PostToolUseFailure", { tool_name: "Bash" }), "3");
+    assert.equal(send("PostToolUseFailure", { tool_name: "Bash", error: "Interrupted", is_interrupt: false }), "3");
+    assert.equal(send("PostToolUseFailure", { tool_name: "mcp__chrome__browser_batch", error: "Interrupted", is_interrupt: true }), "0");
     assert.equal(send("PreToolUse", { tool_name: "AskUserQuestion" }), "4");
     assert.equal(send("PreToolUse", { tool_name: "ExitPlanMode" }), "4");
     assert.equal(send("PermissionRequest", { tool_name: "Bash" }), "4");
